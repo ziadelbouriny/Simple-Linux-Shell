@@ -7,6 +7,8 @@
 #include<signal.h>
 #include<sys/resource.h>
 
+#define clear() printf("\033[H\033[J") 
+
 char cmd[256];
 char *delim = " \n";
 size_t n = 0;
@@ -26,7 +28,7 @@ void tokens();
 int builtIn();
 void exeCommands();
 void parseExport();
-void printDir(); 
+void printDir();
 
 int main(void)
 {
@@ -34,6 +36,8 @@ int main(void)
 	signal(SIGCHLD , on_child_exist);
 	
 	Setup_Environment();
+	
+	clear(); 
 	
     	while(1)
     	{	
@@ -52,7 +56,7 @@ void parseInput()
     	fgets(cmd, 256, stdin);
 
     	if((strlen(cmd) > 0) && (cmd[strlen(cmd) - 1] == '\n'))
-	    cmd[strlen(cmd) - 1] = '\0';
+	    cmd[strlen(cmd) - 1] = '\0'; 
 	    
 	int j = 0;
 	for (int i = 0; i < strlen(cmd); i++)
@@ -203,24 +207,26 @@ void exeCommands()
 	}
 	else if (pid == 0)
 	{ 
-		if(execvp(argv[0], argv) < 0)
-		{
-			printf("\nCould execute this command");
-			exit(EXIT_FAILURE);
-		}	
+		if(argv[1]  && (!strcmp(argv[1], "&")))
+                {
+                        argv[1] = NULL;
+                }
+                		
+                execvp(argv[0], argv);	
+                exit(0);
 	}
 	else
 	{ 
 		if (argv[1])
 		{
-			if(strcmp(argv[1] , "&")==0)
+			if(strcmp(argv[1], "&") == 0)
+			{
+				printf("Process : %d\n", getpid());
             			return;
+            		}		
 		}
-		else
-        	{
-            		waitpid(pid , NULL, 0);
-			return; 
-		}	
+		
+		waitpid(pid , NULL, 0);
 	}
 }  
 
@@ -252,7 +258,6 @@ void Reap_Child_Zombie()
         	Write_To_Log_File();
 }
 
-
 void on_child_exist()
 {
 	Reap_Child_Zombie();
@@ -270,7 +275,7 @@ void Setup_Environment()
 {
     char arr[100];
     chdir(getcwd(arr , 100));
-}		
+}
 
 void shell()
 {   	    
