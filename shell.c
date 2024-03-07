@@ -1,9 +1,11 @@
-#include<stdio.h> 
-#include<string.h> 
-#include<stdlib.h> 
-#include<unistd.h> 
-#include<sys/types.h> 
-#include<sys/wait.h> 
+#include<stdio.h>
+#include<string.h>
+#include<stdlib.h>
+#include<unistd.h>
+#include<sys/wait.h>
+#include<sys/types.h>
+#include<signal.h>
+#include<sys/resource.h>
 
 char cmd[256];
 char *delim = " \n";
@@ -12,25 +14,33 @@ int argc = 0;
 int i = 0;
 char *argv[16];
 char expName[16];
-char expValue[16];
+char expValue[256];
 
 void shell();
-void log_handle(int sig);
+void Setup_Environment();
+void Reap_Child_Zombie();
+void on_child_exist();
+void Write_To_Log_File();
 void parseInput();
 void tokens();
 int builtIn();
 void exeCommands();
 void parseExport();
-void exeEcho();
-
+void printDir(); 
 
 int main(void)
 {
 
-	signal(SIGCHLD, log_handle);
+	signal(SIGCHLD , on_child_exist);
+	
+	Setup_Environment();
 	
     	while(1)
     	{	
+    		printDir();
+        	parseInput();
+        	if(!strcmp("", cmd)) continue;
+        	tokens();
     		shell();
         }	
     
@@ -38,16 +48,14 @@ int main(void)
 }
 
 void parseInput()
-{
-	printf("$ ");
-    
+{   
     	fgets(cmd, 256, stdin);
 
     	if((strlen(cmd) > 0) && (cmd[strlen(cmd) - 1] == '\n'))
 	    cmd[strlen(cmd) - 1] = '\0';
 	    
 	int j = 0;
-	for (int i = 0; i < strlen(cmd); i ++)
+	for (int i = 0; i < strlen(cmd); i++)
 	{
 		if (cmd[i] != '"' && cmd[i] != '\\')
             	{ 
@@ -63,7 +71,7 @@ void parseInput()
             	}
 	}		
 	if(j > 0) 
-	   cmd[j] = 0;    
+	   cmd[j] = 0;   
 }
 
 void tokens()
@@ -80,7 +88,7 @@ void tokens()
     	}
     
     	argv[i] = NULL;
-    	
+    	              
     	int x = 1;
 	while (argv[x])
 	{
@@ -91,7 +99,17 @@ void tokens()
 			        int z = j + 1;
 				argv[x][j] = argv[x][z];
 			}
-			argv[x] = getenv(argv[x]);
+			char *token = NULL;
+			token = strtok(getenv(argv[x]), " ");
+			i = x;
+			
+			while(token)
+    			{
+			    	argv[i] = token;
+			    	token = strtok(NULL, " ");
+			    	i++;
+    			}
+    			break;
 		}
 		x++;		
 	}
@@ -128,8 +146,7 @@ int builtIn()
 			int i = 1;
 			while (argv[i])
 			{
-			        
-				printf("%s", argv[i]);
+				printf("%s ", argv[i]);
 				
 				i++;
 				if (argv[i] == NULL)
@@ -147,28 +164,6 @@ int builtIn()
 	return 0; 
 }
 
-void exeEcho()
-{
-        int i = 1;
-	while (argv[i])
-	{
-		if (argv[i][0] == '$')
-		{
-			for (int j = 0; strlen(argv[i]) - 1  >= j;  j++)
-			{
-			        int z = j + 1;
-				argv[i][j] = argv[i][z];
-			}
-			argv[i] = getenv(argv[i]);
-		}
-		
-		printf("%s\n", argv[i]);
-		
-		i++;	
-		
-	}	
-}
-
 void parseExport()
 {
         int i,j;
@@ -179,77 +174,111 @@ void parseExport()
 		else
 			argv[1][j++] = ' ';	
 	}
-	argv[1][j] = '\0';
+	argv[1][j] = '\0';	
 	
 	char *token = strtok(argv[1], " ");
-	
-	if (token != NULL)
-	{
-		strcpy(expName, token);
-		token = strtok(NULL, " ");
+	strcpy(expName, token);
+	token = strtok(NULL, " ");
+	strcpy(expValue, token);
 		
-		if (token != NULL)
-		{
-			strcpy(expValue, token);
-		}
-		else
-		{
-			expValue[0] = '\0';
-		}
-	}
-	else
+	i = 2;	
+	while (argv[i])
 	{
-		strcpy(argv[1], argv[2]);
-		argv[2][0] = '\0';
+		strcat(expValue, " ");
+		strcat(expValue, argv[i]);
+		i++;
+		if(argv[i])
+			continue;
 	}		
 }
 
 void exeCommands()
 {
-	pid_t pid = fork();
+	pid_t pid = fork(); 
 
-    	if (pid == -1)
-    	{ 
-		printf("\nFailed forking child..\n"); 
+	if (pid == -1)
+	{ 
+		printf("\nFailed forking child.."); 
 		return; 
-	} 
+	}
 	else if (pid == 0)
 	{ 
-		if (execvp(argv[0], argv) < 0)
-		{ 
-			printf("\nCould not execute command..\n"); 
-		} 
-		exit(0); 
+		if(execvp(argv[0], argv) < 0)
+		{
+			printf("\nCould execute this command");
+			exit(EXIT_FAILURE);
+		}	
 	}
 	else
-	{
-		wait(NULL); 
-		return; 
+	{ 
+		if (argv[1])
+		{
+			if(strcmp(argv[1] , "&")==0)
+            			return;
+		}
+		else
+        	{
+            		waitpid(pid , NULL, 0);
+			return; 
+		}	
 	}
 }  
 
-void log_handle(int sig)
+void Write_To_Log_File()
 {
-	FILE *pFile;
-        pFile = fopen("log.txt", "a");
-        
-        if(pFile==NULL)
-            perror("Error opening file.");
+    	FILE * file = fopen("log.text" , "a");
+    	
+    	if(file == NULL)
+    	{
+        	printf("Error in file\n");
+        	exit(EXIT_FAILURE);
+    	}
+    	else
+    	{
+        	fprintf(file , "%s" , "Child process terminated\n");
+    	}
+    	fclose(file);
+}
+
+
+void Reap_Child_Zombie()
+{
+	int status;
+        pid_t id = wait(&status);
+	    
+	if(id == 0 || id == -1)
+	 	return;
         else
-            fprintf(pFile, "[LOG] child proccess terminated.\n");
-            
-        fclose(pFile);
-}  			
+        	Write_To_Log_File();
+}
+
+
+void on_child_exist()
+{
+	Reap_Child_Zombie();
+} 
+
+void printDir() 
+{ 
+	char cwd[1024]; 
+	char* username = getenv("USER"); 
+	getcwd(cwd, sizeof(cwd)); 
+	printf("%s | %s $ ", username, cwd); 
+} 	
+
+void Setup_Environment()
+{
+    char arr[100];
+    chdir(getcwd(arr , 100));
+}		
 
 void shell()
-{   
-        
-        parseInput();
-        tokens();
-        
+{   	    
 	if (builtIn()) 
 		return; 
 	else
+	{
 		exeCommands();
 		return;	
+	}
 }    
